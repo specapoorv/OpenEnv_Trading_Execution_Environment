@@ -17,7 +17,10 @@ load_dotenv()
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+if HF_TOKEN is None:
+    raise ValueError("HF_TOKEN is required.")
+
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 SEED = int(os.getenv("SEED", str(random.randint(1, 10000))))
 TASK_NAME = os.getenv("TASK_NAME", "execution-desk-assistant")
@@ -49,9 +52,9 @@ SYSTEM_PROMPT = textwrap.dedent(
 
 
 def build_client() -> OpenAI:
-    if not API_KEY:
+    if not HF_TOKEN:
         raise RuntimeError("Missing required environment variable: HF_TOKEN")
-    return OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=2.0, max_retries=0)
+    return OpenAI(base_url=API_BASE_URL, HF_TOKEN=API_KEY, timeout=2.0, max_retries=0)
 
 
 def log_start(task: str, env: str, model: str) -> None:
