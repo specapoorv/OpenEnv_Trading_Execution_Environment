@@ -83,7 +83,7 @@ def parse_args() -> argparse.Namespace:
 def build_client() -> OpenAI:
     if not API_KEY:
         raise RuntimeError("Missing required environment variable: HF_TOKEN")
-    return OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=2.0, max_retries=0)
+    return OpenAI(base_url=API_BASE_URL, api_key=API_KEY, timeout=10.0, max_retries=10)
 
 
 class RemoteExecutionDeskEnv:
