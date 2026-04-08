@@ -12,33 +12,46 @@ tags:
 
 # Execution Desk Assistant Environment
 
-This environment simulates a realistic execution desk and is exposed through OpenEnv server/client contracts.
+This repository contains an OpenEnv-compatible execution-desk simulator exposed through a FastAPI API and a Gradio UI. It is designed to work as a Hugging Face Docker Space and as a local OpenEnv environment.
 
-Workflow stages:
+The environment models a realistic three-stage execution workflow:
+
 1. Data validation
 2. System readiness
 3. Order execution
 
----
+## What You Get
 
-## Local setup
+- A mounted UI at `/ui/` for interactive inspection and manual stepping
+- OpenEnv HTTP endpoints for programmatic interaction
+- A root `inference.py` entrypoint for submission and evaluation workflows
+- A root `demo.py` entrypoint for a simple scripted run
+- Pluggable tool calls inside the simulator, so the mocked desk tools can later be replaced with real integrations
+
+## Running Locally
+
+Install dependencies:
 
 ```bash
-cd /home/aditya/openenv/trading_env
 uv sync
 ```
 
-## Run the server
+Start the server:
 
 ```bash
 uvicorn server.app:app --host 0.0.0.0 --port 7860
 ```
 
-Default URL: `http://127.0.0.1:7860`
+Local URLs:
 
-Gradio UI: `http://127.0.0.1:7860/ui/`
+- API root: `http://127.0.0.1:7860`
+- Gradio UI: `http://127.0.0.1:7860/ui/`
+- FastAPI docs: `http://127.0.0.1:7860/docs`
 
-Useful routes:
+## HTTP Endpoints
+
+The environment exposes the standard OpenEnv-style routes:
+
 - `GET /health`
 - `GET /docs`
 - `POST /reset`
@@ -47,25 +60,73 @@ Useful routes:
 - `GET /schema`
 - `WS /ws`
 
----
+Example health check:
 
-## Action space
+```bash
+curl -s http://127.0.0.1:7860/health
+```
+
+Example reset:
+
+```bash
+curl -X POST http://127.0.0.1:7860/reset
+```
+
+Example step:
+
+```bash
+curl -X POST http://127.0.0.1:7860/step \
+  -H 'Content-Type: application/json' \
+  -d '{"action":{"action_type":"CALL_TOOL","tool_name":"market_status_check"}}'
+```
+
+## Using The UI
+
+The Gradio UI is mounted at `/ui/`.
+
+It is intended for fast inspection of a live episode without writing client code.
+
+The UI shows:
+
+- Current task metadata
+- Latest observation payload
+- Latest info payload
+- The last submitted action
+- Episode reward and termination status
+- A step-by-step history table
+- A file-upload tab for replaying saved episode logs
+
+In the live tab, you can:
+
+- Reset the environment
+- Paste an action as JSON
+- Step the simulator manually
+
+The default action example in the UI is:
+
+```json
+{"action_type":"CALL_TOOL","tool_name":"market_status_check"}
+```
+
+## Action Space
 
 Action model: `ExecutionDeskAction`
 
 Fields:
-- `action_type` (required)
-- `tool_name` (optional)
-- `params` (optional)
-- `declare_flag` (optional)
-- `size` (optional)
-- `side` (optional)
-- `broker` (optional)
-- `urgency` (optional)
-- `order_id` (optional)
-- `max_clip` (optional)
 
-`action_type` values:
+- `action_type` required
+- `tool_name` optional
+- `params` optional
+- `declare_flag` optional
+- `size` optional
+- `side` optional
+- `broker` optional
+- `urgency` optional
+- `order_id` optional
+- `max_clip` optional
+
+Supported `action_type` values:
+
 - `CALL_TOOL`
 - `DECLARE`
 - `RESTART_STRATEGY`
@@ -75,195 +136,149 @@ Fields:
 - `CANCEL_ORDER`
 - `CHANGE_BROKER`
 
-`declare_flag` values:
+Supported `declare_flag` values:
+
 - `data_ready`
 - `systems_ready`
 - `execution_complete`
 
 Broker values:
+
 - `broker_alpha`
 - `broker_beta`
 - `broker_delta`
 
 Urgency values:
+
 - `low`
 - `normal`
 - `high`
 
-### Tool names (`CALL_TOOL`)
+## Desk Tools
 
-Data tools:
+The simulator includes task-specific desk tools such as:
+
 - `bloomberg_pull`
 - `oms_position_check`
 - `risk_system_check`
 - `compliance_verify`
 - `internal_report_fetch`
 - `market_status_check`
-
-System tools:
 - `ping_oms_connection`
 - `strategy_health_check`
 - `compliance_recheck`
-- `restart_strategy`
-- `escalate_issue`
-
-Execution tools:
 - `submit_order`
 - `split_order`
 - `cancel_order`
 - `change_broker`
 - `get_current_position`
 
----
+These are currently implemented as environment-side tool handlers, but the design is intentionally pluggable. The same action schema can be wired to real internal services, APIs, or broker adapters later without changing the outer API contract.
 
-## Observation and state
+## Observation Shape
 
 Observation model: `ExecutionDeskObservation`
 
 Top-level fields:
+
 - `observation`
 - `info`
 - `reward`
 - `done`
 - `metadata`
 
-`observation` payload contains:
-- `task_stage` (`data_validation | system_health | execution | done`)
-- `known_data` (tool outputs seen so far)
-- `system_status` (`oms_connected`, `strategy_status`, `escalated`, `current_broker`)
-- `compliance_flags` (`compliance_ok`, `restricted`, `escalation_reason`)
-- `position_state` (`current_position`, `target_position`, `tolerance`, `tracking_error`, `recent_slippage_bps`)
-- `order_state` (`outstanding_orders`, `open_order_count`, `recent_fills`)
-- `timestamps` (`sim_minute`, `step_count`)
+Important observation sections include:
 
-`info` payload contains:
-- `completed_flags` (`data_ready`, `systems_ready`, `execution_complete`)
-- `issue_log`
-- `data_validation` (issues and readiness)
-- `system_readiness` (issues and readiness)
-- `execution_status` (`ready`, `tracking_error`)
-- `event` (last transition event)
+- `task_stage`
+- `known_data`
+- `system_status`
+- `compliance_flags`
+- `position_state`
+- `order_state`
+- `timestamps`
 
-OpenEnv state endpoint returns session state (`episode_id`, `step_count`).
+The `/state` endpoint returns OpenEnv session state, including:
 
----
+- `episode_id`
+- `step_count`
 
-## Reward design
+## Inference And Demo
 
-Reward is dense and event-driven:
-
-- Base step cost (small negative).
-- Positive:
-  - useful tool usage
-  - inconsistency detection
-  - stage advancement
-  - fixing recoverable issues
-  - correct escalation
-  - meaningful fills
-  - lower tracking error
-- Negative:
-  - redundant tools
-  - tool/action failures
-  - invalid actions
-  - premature declares
-  - rejected orders
-  - timeout/truncation with unresolved error
-
-Terminal bonus/penalty depends on success vs unresolved issues.
-
----
-
-## Termination conditions
-
-- `terminated=True` when:
-  - stage reaches `done` via successful `DECLARE execution_complete`, or
-  - escalation ends the system-health stage.
-- `truncated=True` when max steps is reached.
-
----
-
-## Sample local tests
-
-### 1) Health check
+Submission-oriented inference entrypoint:
 
 ```bash
-curl -s http://127.0.0.1:7860/health
+python inference.py
 ```
 
-### 2) Async client smoke test
+Demo entrypoint:
 
 ```bash
-uv run --active python - <<'PY'
-import asyncio
-from trading_env import TradingEnv, ExecutionDeskAction
-
-async def main():
-    env = TradingEnv(base_url="http://127.0.0.1:7860")
-    try:
-        r = await env.reset()
-        print("reset stage:", r.observation.observation.get("task_stage"))
-
-        r = await env.step(
-            ExecutionDeskAction(action_type="CALL_TOOL", tool_name="market_status_check")
-        )
-        print("reward:", r.reward)
-        print("stage:", r.observation.observation.get("task_stage"))
-    finally:
-        await env.close()
-
-asyncio.run(main())
-PY
+python demo.py
 ```
 
-### 3) Typical stage-1 request sequence
+`inference.py`:
 
-```python
-ExecutionDeskAction(action_type="CALL_TOOL", tool_name="bloomberg_pull")
-ExecutionDeskAction(action_type="CALL_TOOL", tool_name="oms_position_check")
-ExecutionDeskAction(action_type="CALL_TOOL", tool_name="risk_system_check")
-ExecutionDeskAction(action_type="CALL_TOOL", tool_name="compliance_verify")
-ExecutionDeskAction(action_type="CALL_TOOL", tool_name="internal_report_fetch")
-ExecutionDeskAction(action_type="CALL_TOOL", tool_name="market_status_check")
-ExecutionDeskAction(action_type="DECLARE", declare_flag="data_ready")
+- uses the OpenAI Python client
+- requires `HF_TOKEN` or `API_KEY`
+- has defaults for `API_BASE_URL` and `MODEL_NAME`
+- emits logs in the required `[START]`, `[STEP]`, `[END]` format
+
+## Environment Variables
+
+Common variables used by inference:
+
+- `HF_TOKEN`
+- `API_KEY`
+- `API_BASE_URL`
+- `MODEL_NAME`
+- `SEED`
+- `MAX_STEPS`
+- `TEMPERATURE`
+- `MAX_TOKENS`
+
+## Validation
+
+Local OpenEnv validation:
+
+```bash
+openenv validate
 ```
 
-Then continue with system checks, declare `systems_ready`, place/split/cancel orders as needed, and finally declare `execution_complete`.
+Submission pre-check script:
 
----
+```bash
+./validate-submission.sh https://your-space.hf.space
+```
 
-## Docker build
+## Docker Build
 
 ```bash
 docker build -t trading_env-env:latest -f Dockerfile .
 ```
 
----
-
-## Project structure
+## Project Layout
 
 ```text
-trading_env/
-├── __init__.py
+OpenEnv-Trading-env/
+├── README.md
+├── Dockerfile
+├── openenv.yaml
+├── requirements.txt
+├── pyproject.toml
+├── inference.py
+├── demo.py
 ├── client.py
 ├── models.py
-├── openenv.yaml
-├── pyproject.toml
-├── Dockerfile
-├── README.md
 ├── server/
-│   ├── __init__.py
 │   ├── app.py
-│   ├── requirements.txt
-│   └── trading_env_environment.py
-└── openenv_quant/
-    ├── __init__.py
-    ├── app.py
-    ├── models.py
-    ├── inference.py
-    ├── validate_submission.py
-    ├── data/
-    ├── env/
-    ├── tasks/
-    ├── tools/
-    └── utils/
+│   ├── env_adapter.py
+│   └── core/
+│       ├── inference.py
+│       ├── demo.py
+│       ├── env/
+│       ├── tasks/
+│       ├── tools/
+│       ├── graders/
+│       └── utils/
+└── validate-submission.sh
 ```
