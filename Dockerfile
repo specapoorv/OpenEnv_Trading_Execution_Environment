@@ -60,17 +60,17 @@ FROM ${BASE_IMAGE}
 WORKDIR /app
 
 # Copy the virtual environment from builder
-COPY --from=builder /app/.venv /app/.venv
+COPY --from=builder /app/env/.venv /app/env/.venv
 
 # Copy the environment code
-COPY --from=builder /app /app
+COPY --from=builder /app/env /app/env
 
 # Set PATH to use the virtual environment
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Set PYTHONPATH so imports work correctly
 ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app:$PYTHONPATH"
+ENV PYTHONPATH="/app/env:$PYTHONPATH"
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:7860/health || exit 1
