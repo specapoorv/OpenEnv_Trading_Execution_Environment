@@ -1,0 +1,6 @@
+{
+  "target_delta_range": [120, 320],
+  "tolerance_range": [4, 12],
+  "base_liquidity_range": [40, 130],
+  "position_drift_probability": 0.1
+}

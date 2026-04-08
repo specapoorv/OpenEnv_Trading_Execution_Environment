@@ -1,0 +1,9 @@
+{
+  "oms_connected_probability": 0.82,
+  "strategy_status_weights": {
+    "running": 0.72,
+    "paused": 0.18,
+    "crashed": 0.1
+  },
+  "compliance_ok_probability": 0.84
+}

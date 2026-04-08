@@ -1,0 +1,11 @@
+{
+  "mid_price_range": [95.0, 105.0],
+  "volume_range": [150000, 600000],
+  "market_open_probability": 0.9,
+  "data_fault_probabilities": {
+    "stale": 0.26,
+    "missing_field": 0.2,
+    "tool_failure": 0.1,
+    "inconsistent": 0.22
+  }
+}
