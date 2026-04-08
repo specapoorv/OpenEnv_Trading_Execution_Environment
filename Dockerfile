@@ -60,7 +60,7 @@ FROM ${BASE_IMAGE}
 WORKDIR /app
 
 # Copy the virtual environment from builder
-COPY --from=builder /app/env/.venv /app/env/.venv
+COPY --from=builder /app/env/.venv /app/.venv
 
 # Copy the environment code
 COPY --from=builder /app/env /app/env
