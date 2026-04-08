@@ -1,4 +1,4 @@
-from server.core.inference import main
+from server.core.refer import main
 
 
 if __name__ == "__main__":
