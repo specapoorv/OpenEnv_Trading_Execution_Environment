@@ -1,3 +1,24 @@
+"""
+Inference Script
+===================================
+MANDATORY
+- Before submitting, ensure the following variables are defined in your environment configuration:
+    API_BASE_URL
+    MODEL_NAME
+    HF_TOKEN
+    LOCAL_IMAGE_NAME
+
+- Defaults are set only for API_BASE_URL and MODEL_NAME.
+- The inference script must be named `inference.py` and placed in the root directory.
+- OpenAI Client must be used for all LLM calls.
+
+STDOUT FORMAT
+- The script emits only:
+    [START] task=<task_name> env=<benchmark> model=<model_name>
+    [STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+    [END] success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -16,8 +37,8 @@ from server.core.utils.constants import ActionType
 
 load_dotenv()
 
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 DEFAULT_ENV_URL = "http://127.0.0.1:7860"
@@ -107,12 +128,10 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
     )
 
 
-def log_end(success: bool, steps: int, grader_scores: Dict[str, float], rewards: List[float]) -> None:
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
     rewards_str = ",".join(f"{reward:.2f}" for reward in rewards)
-    score_str = ", ".join(f"{k}={v:.3f}" for k, v in grader_scores.items())
-    avg_score = sum(grader_scores.values()) / max(1, len(grader_scores))
     print(
-        f"[END] success={str(success).lower()} steps={steps} mean_score={avg_score:.3f} | Tasks: {score_str} | rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -280,8 +299,6 @@ def main() -> None:
     info: Dict[str, Any] = {}
 
     log_start(task=TASK_NAME, env=BENCHMARK, model=MODEL_NAME)
-    print(f"[INFO] Running with SEED={SEED}", flush=True)
-    print(f"[INFO] ENV_URL={args.env_url}", flush=True)
     episode_log["meta"]["env_url"] = args.env_url
 
     try:
@@ -366,7 +383,7 @@ def main() -> None:
             with open("episode_log.json", "w") as f:
                 json.dump(episode_log, f, indent=2)
 
-            log_end(success=success, steps=steps_taken, grader_scores=grader_scores, rewards=rewards)
+            log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
 if __name__ == "__main__":
