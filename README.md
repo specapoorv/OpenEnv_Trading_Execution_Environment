@@ -247,7 +247,7 @@ openenv validate
 Submission pre-check script:
 
 ```bash
-./validate-submission.sh https://your-space.hf.space
+./validate-submission.sh https://specapoorv-trading-execution-environment.hf.space
 ```
 
 ## Docker Build
@@ -273,8 +273,6 @@ OpenEnv-Trading-env/
 │   ├── app.py
 │   ├── env_adapter.py
 │   └── core/
-│       ├── inference.py
-│       ├── demo.py
 │       ├── env/
 │       ├── tasks/
 │       ├── tools/
