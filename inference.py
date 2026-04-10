@@ -66,8 +66,8 @@ def parse_args():
 def build_client() -> OpenAI:
     if not API_KEY:
         raise RuntimeError("Missing HF_TOKEN / API_KEY")
-    if not LOCAL_IMAGE_NAME:
-        raise RuntimeError("Missing LOCAL_IMAGE_NAME")
+    #if not LOCAL_IMAGE_NAME:
+        #raise RuntimeError("Missing LOCAL_IMAGE_NAME")
 
     return OpenAI(
         base_url=API_BASE_URL,
