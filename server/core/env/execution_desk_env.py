@@ -360,25 +360,25 @@ class ExecutionDeskEnv(OpenEnvEnv):
         self.observation_space = build_observation_space(max_steps)
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    if seed is not None:
-        self._seed = seed
-    options = options or {}
-    
-    # Map task_id (from inference.py) to internal stage names
-    task_id = options.get("task_id", "easy")
-    stage_map = {"easy": "DATA", "medium": "SYSTEM", "hard": "EXECUTION"}
-    target_stage = stage_map.get(task_id, "DATA")
+        if seed is not None:
+            self._seed = seed
+        options = options or {}
+        
+        # Map task_id (from inference.py) to internal stage names
+        task_id = options.get("task_id", "easy")
+        stage_map = {"easy": "DATA", "medium": "SYSTEM", "hard": "EXECUTION"}
+        target_stage = stage_map.get(task_id, "DATA")
 
-    self.rng = random.Random(self._seed)
-    self.tool_sim = ToolSimulator(self.rng)
-    self.reward_manager = RewardManager()
-    
-    # Pass the target_stage here!
-    self.scenario = self.tool_sim.initialize_scenario(
-        max_steps=options.get("max_steps", self.max_steps),
-        stage=target_stage 
-    )
-    return build_observation(self.scenario), build_info(self.scenario, self.tool_sim.recency_limit_minutes)
+        self.rng = random.Random(self._seed)
+        self.tool_sim = ToolSimulator(self.rng)
+        self.reward_manager = RewardManager()
+        
+        # Pass the target_stage here!
+        self.scenario = self.tool_sim.initialize_scenario(
+            max_steps=options.get("max_steps", self.max_steps),
+            stage=target_stage 
+        )
+        return build_observation(self.scenario), build_info(self.scenario, self.tool_sim.recency_limit_minutes)
 
     def step(self, action: Dict[str, Any]) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
         prev_state = copy.deepcopy(self.scenario)
