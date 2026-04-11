@@ -270,55 +270,56 @@ def main():
         "hard": "task3_execution"
     }
 
-    for task_id in task_tiers:
-        rewards = []          
-        steps_taken = 0
-        success = False
-        final_task_score = 0.0
+    try:
+        for task_id in task_tiers:
+            rewards = []          
+            steps_taken = 0
+            success = False
+            final_task_score = 0.0
 
-        log_start(task_id, BENCHMARK, MODEL_NAME)
+            log_start(task_id, BENCHMARK, MODEL_NAME)
 
-        try:
-            observation, info = env.reset(SEED, MAX_STEPS, task_id)
-            done = False
+            try:
+                observation, info = env.reset(SEED, MAX_STEPS, task_id)
+                done = False
 
-            for step in range(1, MAX_STEPS + 1):
-                if done:
-                    break
+                for step in range(1, MAX_STEPS + 1):
+                    if done:
+                        break
 
-                model_result = get_model_action(client, observation, info, step)
+                    model_result = get_model_action(client, observation, info, step)
 
-                action = model_result["action"]
-                model_output = model_result["model_output"]
+                    action = model_result["action"]
+                    model_output = model_result["model_output"]
 
-                observation, reward, done, info = env.step(action)
+                    observation, reward, done, info = env.step(action)
 
-                rewards.append(reward)
-                steps_taken = step
+                    rewards.append(reward)
+                    steps_taken = step
 
-                log_step(
-                    step,
-                    action_to_string(action),   
-                    reward,
-                    done,
-                    extract_error(info),
-                )
+                    log_step(
+                        step,
+                        action_to_string(action),   
+                        reward,
+                        done,
+                        extract_error(info),
+                    )
 
-                if model_output == "ERROR":
-                    print("[DEBUG] model failed → fallback used")
+                    if model_output == "ERROR":
+                        print("[DEBUG] model failed → fallback used")
 
-                if done:
-                    break
+                    if done:
+                        break
 
-            scores = info.get("grades", {})
-            final_task_score = scores.get(task_map[task_id], 0.0)
-            success = final_task_score >= SUCCESS_SCORE_THRESHOLD
+                scores = info.get("grades", {})
+                final_task_score = scores.get(task_map[task_id], 0.0)
+                success = final_task_score >= SUCCESS_SCORE_THRESHOLD
 
-            log_end(task_id, success, steps_taken, final_task_score, rewards)
+                log_end(task_id, success, steps_taken, final_task_score, rewards)
 
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        raise
+            except Exception as e:
+                print(f"An error occurred: {e}")
+                continue
     finally:
         env.close() 
     
