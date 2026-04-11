@@ -54,11 +54,11 @@ class ToolSimulator:
             }
 
         elif stage == "SYSTEM":
-            data_anomalies={},
+            data_anomalies={}
             system_truth=self._system_truth()
 
         elif stage == "EXECUTION":
-            data_anomalies= {},
+            data_anomalies= {}
             system_truth = {
                 "oms_connected": True,
                 "strategy_status": "running",
@@ -355,7 +355,7 @@ class ExecutionDeskEnv(OpenEnvEnv):
         self.rng = random.Random(seed)
         self.tool_sim = ToolSimulator(self.rng)
         self.reward_manager = RewardManager()
-        self.scenario = self.tool_sim.initialize_scenario(max_steps=max_steps)
+        self.scenario = self.tool_sim.initialize_scenario(max_steps=max_steps, stage="DATA")
         self.action_space = build_action_space()
         self.observation_space = build_observation_space(max_steps)
 
