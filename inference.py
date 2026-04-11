@@ -124,10 +124,10 @@ def log_step(step, action, reward, done, error):
     )
 
 
-def log_end(success, steps, score, rewards):
+def log_end(task, success, steps, score, rewards):
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        f"[END] task={task} success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -212,65 +212,80 @@ def main():
     args = parse_args()
     client = build_client()
     env = RemoteExecutionDeskEnv(args.env_url)
+    task_tiers = ["easy", "medium", "hard"]
+    #each id needs to be there in openenv yaml
+    task_map = {
+        "easy": "task1_data",
+        "medium": "task2_system",
+        "hard": "task3_execution"
+    }
 
     rewards = []
     steps_taken = 0
     success = False
     score = 0.0
 
-    log_start(TASK_NAME, BENCHMARK, MODEL_NAME)
+    for task_id in task_tiers:
+        log_start(task_id, BENCHMARK, MODEL_NAME)
+        final_task_score = 0.0  # Reset for each tier
 
-    try:
-        observation, info = env.reset(SEED, MAX_STEPS)
-        done = False
+        try:
+            observation, info = env.reset(SEED, MAX_STEPS)
+            done = False
 
-        for step in range(1, MAX_STEPS + 1):
-            if done:
-                break
+            for step in range(1, MAX_STEPS + 1):
+                if done:
+                    break
 
-            prompt = summarize(observation, info, step)
+                prompt = summarize(observation, info, step)
 
-            try:
-                completion = client.chat.completions.create(
-                    model=MODEL_NAME,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=TEMPERATURE,
-                    max_tokens=MAX_TOKENS,
+                try:
+                    completion = client.chat.completions.create(
+                        model=MODEL_NAME,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=TEMPERATURE,
+                        max_tokens=MAX_TOKENS,
+                    )
+                    action_str = (completion.choices[0].message.content or "").strip()
+                except Exception:
+                    action_str = ""
+
+                action = action_str_to_dict(action_str)
+                if not action:
+                    action = heuristic_policy(observation, info)
+                    action_str = "fallback"
+
+                observation, reward, done, info = env.step(action)
+
+                rewards.append(reward)
+                steps_taken = step
+
+                log_step(
+                    step,
+                    action_str,
+                    reward,
+                    done,
+                    extract_error(info),
                 )
-                action_str = (completion.choices[0].message.content or "").strip()
-            except Exception:
-                action_str = ""
 
-            action = action_str_to_dict(action_str)
-            if not action:
-                action = heuristic_policy(observation, info)
-                action_str = "fallback"
+                if done:
+                    break
 
-            observation, reward, done, info = env.step(action)
+            #remove this, this was averaging reward not using graders
+            # score = min(max(sum(rewards) / max(1, len(rewards)), 0.0), 1.0)
+            scores = info.get("grades", {})
+            final_task_score = scores.get(task_map[task_id], 0.0)
+            success = final_task_score >= SUCCESS_SCORE_THRESHOLD
+            
+            log_end(task_id, success, steps_taken, final_task_score, rewards)
 
-            rewards.append(reward)
-            steps_taken = step
+        finally:
+            env.close()
+            log_end(task_id, success, steps_taken, final_task_score, rewards)
 
-            log_step(
-                step,
-                action_str,
-                reward,
-                done,
-                extract_error(info),
-            )
-
-            if done:
-                break
-
-        score = min(max(sum(rewards) / max(1, len(rewards)), 0.0), 1.0)
-        success = score >= SUCCESS_SCORE_THRESHOLD
-
-    finally:
-        env.close()
-        log_end(success, steps_taken, score, rewards)
 
 
 if __name__ == "__main__":

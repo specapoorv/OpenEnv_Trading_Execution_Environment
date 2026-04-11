@@ -166,5 +166,8 @@ def build_info(state: ScenarioState, recency_limit_minutes: int, event: Optional
             ),
             "quality": exec_quality,
         },
+        # This makes the scores generated in _handle_declare or the safety net 
+        # visible to the remote client (inference.py)
+        "grades": getattr(state, "grades", {}),
         "event": copy.deepcopy(event),
     }

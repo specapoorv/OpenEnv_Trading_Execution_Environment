@@ -12,6 +12,7 @@ from server.core.env.reward_manager import RewardManager
 from server.core.tasks.task1_data_verification import evaluate_data_readiness
 from server.core.tasks.task2_system_monitoring import evaluate_system_readiness, system_unresolved_issues
 from server.core.tasks.task3_execution_assistance import evaluate_execution_complete
+from server.core.graders.task_graders import grade_data_validation, grade_system_readiness, grade_execution
 from server.core.tools import TOOL_REGISTRY
 from server.core.utils.constants import (
     ActionType,
@@ -348,8 +349,26 @@ class ExecutionDeskEnv(OpenEnvEnv):
         self._apply_action(action, event)
         if self.scenario.stage != Stage.DONE:
             self.tool_sim.advance_market(self.scenario)
+
         terminated, truncated, terminal_event = check_terminal_conditions(self.scenario, self.tool_sim.recency_limit_minutes)
         event.update(terminal_event)
+
+        # THE SAFETY NET GRADER HERE, grades if timeout happened 
+        if terminated or truncated:
+            if not hasattr(self.scenario, 'grades'):
+                self.scenario.grades = {}
+            
+            # Fill in any missing scores (for tasks the agent didn't finish)
+            if "task1_data" not in self.scenario.grades:
+                self.scenario.grades["task1_data"] = grade_data_validation(self.scenario)
+            
+            if "task2_system" not in self.scenario.grades:
+                self.scenario.grades["task2_system"] = grade_system_readiness(self.scenario)
+                
+            if "task3_execution" not in self.scenario.grades:
+                self.scenario.grades["task3_execution"] = grade_execution(self.scenario)
+
+
         reward = self.reward_manager.compute(prev_state, self.scenario, event, terminated, truncated)
         return build_observation(self.scenario), reward, terminated, truncated, build_info(self.scenario, self.tool_sim.recency_limit_minutes, event)
 
@@ -424,11 +443,16 @@ class ExecutionDeskEnv(OpenEnvEnv):
         event["invalid_action"] = True
 
     def _handle_declare(self, declare_flag: Optional[str], event: Dict[str, Any]) -> None:
+        if not hasattr(self.scenario, 'grades'):
+            self.scenario.grades = {}
+        
         if declare_flag == "data_ready":
             validation = evaluate_data_readiness(self.scenario, self.tool_sim.recency_limit_minutes)
             if self.scenario.stage == Stage.DATA_VALIDATION and validation["ready"]:
-                self.scenario.stage = Stage.SYSTEM_HEALTH
+                #TASK 1 Completed, Grader can grade now
                 self.scenario.completed_flags["data_ready"] = True
+                self.scenario.grades["task1_data"] = grade_data_validation(self.scenario)
+                self.scenario.stage = Stage.SYSTEM_HEALTH
                 event["stage_advanced"] = True
             else:
                 event["premature_declare"] = True
@@ -437,8 +461,9 @@ class ExecutionDeskEnv(OpenEnvEnv):
         if declare_flag == "systems_ready":
             readiness = evaluate_system_readiness(self.scenario)
             if self.scenario.stage == Stage.SYSTEM_HEALTH and readiness["ready"]:
-                self.scenario.stage = Stage.EXECUTION
                 self.scenario.completed_flags["systems_ready"] = True
+                self.scenario.grades["task2_system"] = grade_system_readiness(self.scenario)
+                self.scenario.stage = Stage.EXECUTION
                 # Record when execution stage started for the step-budget grader
                 self.scenario.execution_truth["exec_stage_start_step"] = self.scenario.step_count
                 event["stage_advanced"] = True
@@ -449,8 +474,9 @@ class ExecutionDeskEnv(OpenEnvEnv):
         if declare_flag == "execution_complete":
             complete = evaluate_execution_complete(self.scenario)
             if self.scenario.stage == Stage.EXECUTION and complete["ready"]:
-                self.scenario.stage = Stage.DONE
                 self.scenario.completed_flags["execution_complete"] = True
+                self.scenario.grades["task3_execution"] = grade_execution(self.scenario)
+                self.scenario.stage = Stage.DONE
                 event["stage_advanced"] = True
                 event["success"] = True
             else:
