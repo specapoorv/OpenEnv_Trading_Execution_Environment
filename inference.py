@@ -316,8 +316,11 @@ def main():
 
             log_end(task_id, success, steps_taken, final_task_score, rewards)
 
-        finally:
-            env.close()   
-
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        raise
+    finally:
+        env.close() 
+    
 if __name__ == "__main__":
     main()

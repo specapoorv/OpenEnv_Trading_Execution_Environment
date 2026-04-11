@@ -22,7 +22,7 @@ from server.core.utils.constants import (
     SYSTEM_TOOLS,
     URGENCY_LEVELS,
 )
-from server.core.utils.randomizers import sample_data_anomaly
+from server.core.utils.randomizers import sample_data_anomaly, sample_data_probabilities
 
 
 class ToolSimulator:
@@ -38,12 +38,12 @@ class ToolSimulator:
 
         if stage == Stage.DATA_VALIDATION:
             data_anomalies = {
-                "bloomberg_pull": sample_data_anomaly(self.rng, True),
-                "oms_position_check": sample_data_anomaly(self.rng, True),
-                "risk_system_check": False,
-                "compliance_verify": False,
-                "internal_report_fetch": sample_data_anomaly(self.rng, True),
-                "market_status_check": False,
+                "bloomberg_pull": sample_data_probabilities(self.rng, True),
+                "oms_position_check": sample_data_probabilities(self.rng, True),
+                "risk_system_check": {},
+                "compliance_verify": {},
+                "internal_report_fetch": sample_data_probabilities(self.rng, True),
+                "market_status_check": {},
             }
             system_truth = {
                 "oms_connected": True,
@@ -128,15 +128,16 @@ class ToolSimulator:
             state.tool_failures[tool_name] = state.tool_failures.get(tool_name, 0) + 1
         return output
 
+    # tools folder call this function
     def simulate_data_tool(self, state: ScenarioState, tool_name: str) -> Dict[str, Any]:
         base = state.data_anomalies.get(tool_name, {})
         call_count = state.tool_call_counts.get(tool_name, 1)
-        decay = max(0.15, 1.0 - 0.25 * (call_count - 1))
+        decay = max(0.0, 1.0 - 0.35 * (call_count - 1))        
         anomaly = {
-            "tool_failure": base.get("tool_failure", False) and self.rng.random() < 0.60 * decay,
-            "missing_field": base.get("missing_field", False) and self.rng.random() < 0.55 * decay,
-            "stale": base.get("stale", False) and self.rng.random() < 0.65 * decay,
-            "inconsistent": base.get("inconsistent", False) and self.rng.random() < 0.70 * decay,
+            "tool_failure": self.rng.random() < (base.get("tool_failure", 0.0) * decay),
+            "missing_field": self.rng.random() < (base.get("missing_field", 0.0) * decay),
+            "stale": self.rng.random() < (base.get("stale", 0.0) * decay),
+            "inconsistent": self.rng.random() < (base.get("inconsistent", 0.0) * decay),
         }
         if anomaly["tool_failure"]:
             return {"ok": False, "error": "transient_tool_failure", "timestamp": state.now_minute}
@@ -231,7 +232,6 @@ class ToolSimulator:
         '''
         Advances Market with randomness out of our control
         '''
-
         state.step_count += 1
         state.now_minute += 1
         execution = state.execution_truth
@@ -362,6 +362,8 @@ class ExecutionDeskEnv(OpenEnvEnv):
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if seed is not None:
             self._seed = seed
+        else:
+            self._seed += 1
         options = options or {}
         
         # Map task_id (from inference.py) to internal stage names
