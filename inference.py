@@ -261,6 +261,7 @@ def get_model_action(client: OpenAI, observation: Dict[str, Any], info: Dict[str
 def main():
     args = parse_args()
     client = build_client()
+    env = RemoteExecutionDeskEnv(args.env_url)   
 
     task_tiers = ["easy", "medium", "hard"]
     task_map = {
@@ -270,7 +271,6 @@ def main():
     }
 
     for task_id in task_tiers:
-        env = RemoteExecutionDeskEnv(args.env_url)   
         rewards = []          
         steps_taken = 0
         success = False

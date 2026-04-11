@@ -30,14 +30,22 @@ class EnvAdapter(Environment):
         self._env = ExecutionDeskEnv(seed=seed, max_steps=max_steps)
         self._seed = seed
         self._state = State(episode_id=str(uuid4()), step_count=0)
-
     def reset(self, seed: int | None = None, episode_id: str | None = None, **kwargs: Any) -> ExecutionDeskObservation:
         """Reset environment and return initial observation."""
-        options = kwargs.get("options", {})
+        # Start with the options dict if provided
+        options = dict(kwargs.get("options", {}))
+        
+        # 1. Capture max_steps if passed as a top-level argument
         if "max_steps" in kwargs:
-            options.setdefault("max_steps", kwargs["max_steps"])
+            options["max_steps"] = kwargs["max_steps"]
+            
+        # 2. Capture task_id if passed as a top-level argument (from inference.py)
+        if "task_id" in kwargs:
+            options["task_id"] = kwargs["task_id"]
 
+        # 3. Pass the consolidated options to the actual environment
         observation, info = self._env.reset(seed=seed or self._seed, options=options or None)
+        
         self._state = State(episode_id=episode_id or str(uuid4()), step_count=0)
 
         return ExecutionDeskObservation(
@@ -47,7 +55,6 @@ class EnvAdapter(Environment):
             reward=0.0,
             metadata={"stage": observation.get("task_stage")},
         )
-
     def step(self, action: ExecutionDeskAction) -> ExecutionDeskObservation:
         """Take an action and return the observation."""
         action_payload = action.model_dump(exclude_none=True)
