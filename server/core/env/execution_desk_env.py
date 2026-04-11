@@ -355,7 +355,7 @@ class ExecutionDeskEnv(OpenEnvEnv):
         self.rng = random.Random(seed)
         self.tool_sim = ToolSimulator(self.rng)
         self.reward_manager = RewardManager()
-        self.scenario = self.tool_sim.initialize_scenario(max_steps=max_steps, stage="DATA")
+        self.scenario = self.tool_sim.initialize_scenario(max_steps=max_steps, stage=Stage.DATA_VALIDATION)
         self.action_space = build_action_space()
         self.observation_space = build_observation_space(max_steps)
 
