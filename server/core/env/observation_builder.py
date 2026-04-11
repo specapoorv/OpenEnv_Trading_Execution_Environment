@@ -64,7 +64,7 @@ def build_observation(state: ScenarioState) -> Dict[str, Any]:
 
     execution = state.execution_truth
     return {
-        "task_stage": state.stage.value,
+        "task_stage": state.stage.value if hasattr(state.stage, "value") else state.stage,
         "known_data": copy.deepcopy(state.tool_outputs),
         "system_status": {
             "oms_connected": state.system_truth["oms_connected"],

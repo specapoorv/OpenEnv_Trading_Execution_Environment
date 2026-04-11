@@ -53,7 +53,7 @@ class Order:
 
 @dataclass
 class ScenarioState:
-    stage: str
+    stage: Stage
     step_count: int = 0
     now_minute: int = 0
     max_steps: int = 60

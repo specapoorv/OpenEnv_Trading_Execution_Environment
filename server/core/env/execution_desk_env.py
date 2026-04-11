@@ -30,13 +30,13 @@ class ToolSimulator:
         self.rng = rng
         self.recency_limit_minutes = recency_limit_minutes
 
-    def initialize_scenario(self, max_steps: int, stage: str) -> ScenarioState:
+    def initialize_scenario(self, max_steps: int, stage) -> ScenarioState:
         mid_price = round(self.rng.uniform(95.0, 105.0), 2)
         base_position = self.rng.randint(-200, 200)
         target_delta = self.rng.choice([-1, 1]) * self.rng.randint(120, 320)
         target_position = base_position + target_delta
 
-        if stage == "DATA":
+        if stage == Stage.DATA_VALIDATION:
             data_anomalies = {
                 "bloomberg_pull": sample_data_anomaly(self.rng, True),
                 "oms_position_check": sample_data_anomaly(self.rng, True),
@@ -53,11 +53,11 @@ class ToolSimulator:
                 "oms_recoverable": True,
             }
 
-        elif stage == "SYSTEM":
+        elif stage == Stage.SYSTEM_HEALTH:
             data_anomalies={}
             system_truth=self._system_truth()
 
-        elif stage == "EXECUTION":
+        elif stage == Stage.EXECUTION:
             data_anomalies= {}
             system_truth = {
                 "oms_connected": True,
@@ -366,7 +366,11 @@ class ExecutionDeskEnv(OpenEnvEnv):
         
         # Map task_id (from inference.py) to internal stage names
         task_id = options.get("task_id", "easy")
-        stage_map = {"easy": "DATA", "medium": "SYSTEM", "hard": "EXECUTION"}
+        stage_map = {
+            "easy": Stage.DATA_VALIDATION, 
+            "medium": Stage.SYSTEM_HEALTH, 
+            "hard": Stage.EXECUTION
+        }        
         target_stage = stage_map.get(task_id, "DATA")
 
         self.rng = random.Random(self._seed)
