@@ -4,3 +4,22 @@ type: space
 runtime: fastapi
 app: server.app:app
 port: 7860
+
+tasks:
+  - id: easy
+    name: "Data Validation"
+    description: "Identify transient failures, stale timestamps, and cross-reference price mismatches across Bloomberg and Internal tools."
+    reward_range: [0.0, 1.0]
+    grader: "server.core.env.graders:grade_data_validation"
+
+  - id: medium
+    name: "System Readiness"
+    description: "Monitor OMS connectivity and Strategy health. Attempt recovery for fixable crashes and escalate unrecoverable errors."
+    reward_range: [0.0, 1.0]
+    grader: "server.core.env.graders:grade_system_readiness"
+
+  - id: hard
+    name: "Order Execution"
+    description: "Execute a target position within a specific slippage budget and time limit without breaching hard risk constraints."
+    reward_range: [0.0, 1.0]
+    grader: "server.core.env.graders:grade_execution"

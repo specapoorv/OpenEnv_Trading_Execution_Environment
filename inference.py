@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import json 
 import argparse
 import os
 import random
@@ -34,21 +34,34 @@ SUCCESS_SCORE_THRESHOLD = float(os.getenv("SUCCESS_SCORE_THRESHOLD", "0.8"))
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are controlling a trading execution environment.
+You are controlling a three-stage trading execution desk environment.
+    Choose exactly one next action.
+    Return valid JSON with this schema:
+    {
+      "action_type": "CALL_TOOL|DECLARE|RESTART_STRATEGY|ESCALATE|SUBMIT_ORDER|SPLIT_ORDER|CANCEL_ORDER|CHANGE_BROKER",
+      "tool_name": "<optional tool>",
+      "declare_flag": "<optional flag>",
+      "size": <optional integer>,
+      "side": "<optional buy|sell>",
+      "broker": "<optional broker_alpha|broker_beta|broker_delta>",
+      "urgency": "<optional low|normal|high>",
+      "order_id": <optional integer>,
+      "max_clip": <optional integer>
+    }
+    Prefer safe, high-value progress. If uncertain, choose a single useful tool call.
+    Follow strict priority:
 
-    Choose EXACTLY ONE action.
+    1. If data_validation is not complete:
+    - ONLY call tools to fix data
+    - Do NOT restart strategy or escalate
 
-    Output STRICTLY one action string in this format:
-    - call_tool(tool_name)
-    - declare(flag)
-    - restart_strategy()
-    - escalate()
-    - submit_order(size,side,broker,urgency)
-    - split_order(size,side,broker,urgency,max_clip)
-    - cancel_order(order_id)
-    - change_broker(broker)
+    2. If data is complete but system_readiness is not:
+    - Fix system issues (restart_strategy, escalate, etc.)
 
-    No JSON. No explanations. Only the action string.
+    3. Only when both are complete:
+    - Perform execution actions
+
+    Never skip steps.
     """
 ).strip()
 
@@ -93,8 +106,12 @@ class RemoteExecutionDeskEnv:
         done = bool(payload.get("done", False))
         return obs, reward, done, info
 
-    def reset(self, seed, max_steps):
-        r = self._client.post("/reset", json={"seed": seed, "max_steps": max_steps})
+    def reset(self, seed, max_steps, task_id: str):
+        r = self._client.post("/reset", json={
+            "seed": seed, 
+            "max_steps": max_steps,
+            "task_id": task_id
+            })
         if r.status_code >= 400:
             r = self._client.post("/reset")
         r.raise_for_status()
@@ -132,131 +149,147 @@ def log_end(task, success, steps, score, rewards):
     )
 
 
-# ---------------- Action Parsing ----------------
+def action_to_string(action: Dict[str, Any]) -> str:
+    action_type = str(action.get("action_type"))
+    if action_type.endswith(ActionType.CALL_TOOL.value):
+        return f"call_tool('{action.get('tool_name', '')}')"
+    if action_type.endswith(ActionType.DECLARE.value):
+        return f"declare('{action.get('declare_flag', '')}')"
+    if action_type.endswith(ActionType.RESTART_STRATEGY.value):
+        return "restart_strategy()"
+    if action_type.endswith(ActionType.ESCALATE.value):
+        return "escalate()"
+    if action_type.endswith(ActionType.SUBMIT_ORDER.value):
+        return (
+            f"submit_order(size={int(action.get('size', 0))},side='{action.get('side', 'buy')}',"
+            f"broker='{action.get('broker', 'broker_alpha')}',urgency='{action.get('urgency', 'normal')}')"
+        )
+    if action_type.endswith(ActionType.SPLIT_ORDER.value):
+        return (
+            f"split_order(size={int(action.get('size', 0))},side='{action.get('side', 'buy')}',"
+            f"broker='{action.get('broker', 'broker_alpha')}',urgency='{action.get('urgency', 'normal')}',"
+            f"max_clip={int(action.get('max_clip', 0))})"
+        )
+    if action_type.endswith(ActionType.CANCEL_ORDER.value):
+        return f"cancel_order(order_id={int(action.get('order_id', 0))})"
+    if action_type.endswith(ActionType.CHANGE_BROKER.value):
+        return f"change_broker('{action.get('broker', 'broker_alpha')}')"
+    return json.dumps(action, sort_keys=True)
 
-def action_str_to_dict(action_str: str) -> Dict[str, Any]:
+def parse_model_action(text: str) -> Optional[Dict[str, Any]]:
+    text = text.strip()
+    if not text:
+        return None
     try:
-        if action_str.startswith("call_tool"):
-            name = action_str[action_str.find("(")+1:-1]
-            return {"action_type": ActionType.CALL_TOOL.value, "tool_name": name}
-
-        if action_str.startswith("declare"):
-            flag = action_str[action_str.find("(")+1:-1]
-            return {"action_type": ActionType.DECLARE.value, "declare_flag": flag}
-
-        if action_str.startswith("restart_strategy"):
-            return {"action_type": ActionType.RESTART_STRATEGY.value}
-
-        if action_str.startswith("escalate"):
-            return {"action_type": ActionType.ESCALATE.value}
-
-        if action_str.startswith("submit_order"):
-            args = action_str[action_str.find("(")+1:-1].split(",")
-            return {
-                "action_type": ActionType.SUBMIT_ORDER.value,
-                "size": int(args[0]),
-                "side": args[1],
-                "broker": args[2],
-                "urgency": args[3],
-            }
-
-        if action_str.startswith("split_order"):
-            args = action_str[action_str.find("(")+1:-1].split(",")
-            return {
-                "action_type": ActionType.SPLIT_ORDER.value,
-                "size": int(args[0]),
-                "side": args[1],
-                "broker": args[2],
-                "urgency": args[3],
-                "max_clip": int(args[4]),
-            }
-
-        if action_str.startswith("cancel_order"):
-            oid = int(action_str[action_str.find("(")+1:-1])
-            return {"action_type": ActionType.CANCEL_ORDER.value, "order_id": oid}
-
-        if action_str.startswith("change_broker"):
-            broker = action_str[action_str.find("(")+1:-1]
-            return {"action_type": ActionType.CHANGE_BROKER.value, "broker": broker}
-
-    except Exception:
-        pass
-
-    return {}
-
-
-def extract_error(info):
-    event = info.get("event", {})
-    for k in ["last_tool_result", "last_order_result"]:
-        if isinstance(event.get(k), dict) and event[k].get("error"):
-            return str(event[k]["error"])
-    if event.get("invalid_action"):
-        return "invalid_action"
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                data = json.loads(text[start : end + 1])
+                return data if isinstance(data, dict) else None
+            except json.JSONDecodeError:
+                return None
     return None
 
 
-def summarize(observation, info, step):
-    return str(
+def extract_error(info: Dict[str, Any]) -> Optional[str]:
+    event = info.get("event", {})
+    for key in ["last_tool_result", "last_order_result"]:
+        payload = event.get(key)
+        if isinstance(payload, dict) and payload.get("error"):
+            return str(payload["error"])
+    if event.get("premature_declare"):
+        return "premature_declare"
+    if event.get("invalid_action"):
+        return "invalid_action"
+    if event.get("bad_escalation"):
+        return "bad_escalation"
+    return None
+
+def summarize_for_model(observation: Dict[str, Any], info: Dict[str, Any], step: int) -> str:
+    return json.dumps(
         {
             "step": step,
-            "stage": observation.get("task_stage"),
-            "orders": observation["order_state"]["open_order_count"],
-            "issues": info.get("data_validation"),
-        }
+            "task_stage": observation["task_stage"],
+            "position_state": observation["position_state"],
+            "system_status": observation["system_status"],
+            "order_state": {
+                "open_order_count": observation["order_state"]["open_order_count"],
+                "recent_fills": observation["order_state"]["recent_fills"][-2:],
+            },
+            "data_validation": info["data_validation"],
+            "system_readiness": info["system_readiness"],
+            "execution_status": info["execution_status"],
+        },
+        sort_keys=True,
     )
 
+def get_model_action(client: OpenAI, observation: Dict[str, Any], info: Dict[str, Any], step: int) -> Dict[str, Any]:
+    fallback = heuristic_policy(observation, info)
+    try:
+        obs_summary = summarize_for_model(observation, info, step)
 
+
+        completion = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": obs_summary},
+            ],
+            temperature=TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+            stream=False,
+        )
+        content = (completion.choices[0].message.content or "").strip()
+        parsed = parse_model_action(content)
+        return {
+            "action": parsed if parsed else fallback,
+            "model_output": content,
+            "model_input": obs_summary
+            }
+    except Exception:
+        return {
+            "action": fallback,
+            "model_output": "ERROR",
+            "model_input": ""
+        }
 # ---------------- Main ----------------
 
 def main():
     args = parse_args()
     client = build_client()
-    env = RemoteExecutionDeskEnv(args.env_url)
+
     task_tiers = ["easy", "medium", "hard"]
-    #each id needs to be there in openenv yaml
     task_map = {
         "easy": "task1_data",
         "medium": "task2_system",
         "hard": "task3_execution"
     }
 
-    rewards = []
-    steps_taken = 0
-    success = False
-    score = 0.0
-
     for task_id in task_tiers:
+        env = RemoteExecutionDeskEnv(args.env_url)   
+        rewards = []          
+        steps_taken = 0
+        success = False
+        final_task_score = 0.0
+
         log_start(task_id, BENCHMARK, MODEL_NAME)
-        final_task_score = 0.0  # Reset for each tier
 
         try:
-            observation, info = env.reset(SEED, MAX_STEPS)
+            observation, info = env.reset(SEED, MAX_STEPS, task_id)
             done = False
 
             for step in range(1, MAX_STEPS + 1):
                 if done:
                     break
 
-                prompt = summarize(observation, info, step)
+                model_result = get_model_action(client, observation, info, step)
 
-                try:
-                    completion = client.chat.completions.create(
-                        model=MODEL_NAME,
-                        messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT},
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=TEMPERATURE,
-                        max_tokens=MAX_TOKENS,
-                    )
-                    action_str = (completion.choices[0].message.content or "").strip()
-                except Exception:
-                    action_str = ""
-
-                action = action_str_to_dict(action_str)
-                if not action:
-                    action = heuristic_policy(observation, info)
-                    action_str = "fallback"
+                action = model_result["action"]
+                model_output = model_result["model_output"]
 
                 observation, reward, done, info = env.step(action)
 
@@ -265,28 +298,26 @@ def main():
 
                 log_step(
                     step,
-                    action_str,
+                    action_to_string(action),   
                     reward,
                     done,
                     extract_error(info),
                 )
 
+                if model_output == "ERROR":
+                    print("[DEBUG] model failed → fallback used")
+
                 if done:
                     break
 
-            #remove this, this was averaging reward not using graders
-            # score = min(max(sum(rewards) / max(1, len(rewards)), 0.0), 1.0)
             scores = info.get("grades", {})
             final_task_score = scores.get(task_map[task_id], 0.0)
             success = final_task_score >= SUCCESS_SCORE_THRESHOLD
-            
+
             log_end(task_id, success, steps_taken, final_task_score, rewards)
 
         finally:
-            env.close()
-            log_end(task_id, success, steps_taken, final_task_score, rewards)
-
-
+            env.close()   
 
 if __name__ == "__main__":
     main()

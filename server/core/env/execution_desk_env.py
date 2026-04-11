@@ -30,12 +30,45 @@ class ToolSimulator:
         self.rng = rng
         self.recency_limit_minutes = recency_limit_minutes
 
-    def initialize_scenario(self, max_steps: int) -> ScenarioState:
+    def initialize_scenario(self, max_steps: int, stage: str) -> ScenarioState:
         mid_price = round(self.rng.uniform(95.0, 105.0), 2)
         base_position = self.rng.randint(-200, 200)
         target_delta = self.rng.choice([-1, 1]) * self.rng.randint(120, 320)
         target_position = base_position + target_delta
+
+        if stage == "DATA":
+            data_anomalies = {
+                "bloomberg_pull": sample_data_anomaly(self.rng, True),
+                "oms_position_check": sample_data_anomaly(self.rng, True),
+                "risk_system_check": False,
+                "compliance_verify": False,
+                "internal_report_fetch": sample_data_anomaly(self.rng, True),
+                "market_status_check": False,
+            }
+            system_truth = {
+                "oms_connected": True,
+                "strategy_status": "running",
+                "strategy_recoverable": True,
+                "compliance_ok": True,
+                "oms_recoverable": True,
+            }
+
+        elif stage == "SYSTEM":
+            data_anomalies={},
+            system_truth=self._system_truth()
+
+        elif stage == "EXECUTION":
+            data_anomalies= {},
+            system_truth = {
+                "oms_connected": True,
+                "strategy_status": "running",
+                "strategy_recoverable": True,
+                "compliance_ok": True,
+                "oms_recoverable": True,
+            }
+
         state = ScenarioState(
+            stage = stage,
             max_steps=max_steps,
             current_broker=self.rng.choice(BROKERS),
             data_truth={
@@ -47,15 +80,8 @@ class ToolSimulator:
                 "restricted": False,
                 "timestamp": 0,
             },
-            data_anomalies={
-                "bloomberg_pull": sample_data_anomaly(self.rng, True),
-                "oms_position_check": sample_data_anomaly(self.rng, True),
-                "risk_system_check": sample_data_anomaly(self.rng, False),
-                "compliance_verify": sample_data_anomaly(self.rng, False),
-                "internal_report_fetch": sample_data_anomaly(self.rng, True),
-                "market_status_check": sample_data_anomaly(self.rng, False),
-            },
-            system_truth=self._system_truth(),
+            data_anomalies=data_anomalies,
+            system_truth=system_truth,
             execution_truth={
                 "current_position": base_position,
                 "target_position": target_position,
@@ -334,13 +360,25 @@ class ExecutionDeskEnv(OpenEnvEnv):
         self.observation_space = build_observation_space(max_steps)
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-        if seed is not None:
-            self._seed = seed
-        self.rng = random.Random(self._seed)
-        self.tool_sim = ToolSimulator(self.rng)
-        self.reward_manager = RewardManager()
-        self.scenario = self.tool_sim.initialize_scenario(max_steps=(options or {}).get("max_steps", self.max_steps))
-        return build_observation(self.scenario), build_info(self.scenario, self.tool_sim.recency_limit_minutes)
+    if seed is not None:
+        self._seed = seed
+    options = options or {}
+    
+    # Map task_id (from inference.py) to internal stage names
+    task_id = options.get("task_id", "easy")
+    stage_map = {"easy": "DATA", "medium": "SYSTEM", "hard": "EXECUTION"}
+    target_stage = stage_map.get(task_id, "DATA")
+
+    self.rng = random.Random(self._seed)
+    self.tool_sim = ToolSimulator(self.rng)
+    self.reward_manager = RewardManager()
+    
+    # Pass the target_stage here!
+    self.scenario = self.tool_sim.initialize_scenario(
+        max_steps=options.get("max_steps", self.max_steps),
+        stage=target_stage 
+    )
+    return build_observation(self.scenario), build_info(self.scenario, self.tool_sim.recency_limit_minutes)
 
     def step(self, action: Dict[str, Any]) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
         prev_state = copy.deepcopy(self.scenario)
