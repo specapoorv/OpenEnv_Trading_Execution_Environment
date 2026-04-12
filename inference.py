@@ -146,7 +146,8 @@ class RemoteExecutionDeskEnv:
         self.ws = None
 
     async def connect(self):
-        self.ws = await websockets.connect(self.ws_url)
+        if self.ws is None:
+            self.ws = await websockets.connect(self.ws_url)
 
 
     def _parse(self, payload):
@@ -258,7 +259,11 @@ class RemoteExecutionDeskEnv:
 
     async def close(self):
         if self.ws:
-            await self.ws.close()
+            try:
+                await self.ws.close()
+            except Exception:
+                pass # Already closed
+            self.ws = None
 
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
