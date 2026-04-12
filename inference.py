@@ -67,6 +67,11 @@ You are controlling a three-stage trading execution desk environment.
     """
 ).strip()
 
+DEBUG = os.getenv("DEBUG", "false").lower() == "true"
+
+def dprint(*args, **kwargs):
+    if DEBUG:
+        print(*args, **kwargs)
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -92,43 +97,168 @@ def build_client() -> OpenAI:
     )
 
 
+# class RemoteExecutionDeskEnv:
+#     def __init__(self, base_url: str):
+#         self._client = httpx.Client(
+#             base_url=base_url.rstrip("/"),
+#             timeout=30.0,
+#             follow_redirects=True,
+#         )
+#         self.session_id = str(uuid4())
+
+#     def _parse(self, payload):
+#         obs_wrap = payload.get("observation", {})
+#         obs = obs_wrap.get("observation", {})
+#         info = obs_wrap.get("info", {})
+#         reward = float(payload.get("reward", 0.0) or 0.0)
+#         done = bool(payload.get("done", False))
+#         return obs, reward, done, info
+
+#     def reset(self, seed, max_steps, task_id: str):
+#         r = self._client.post("/reset", json={
+#             "seed": seed, 
+#             "max_steps": max_steps,
+#             "task_id": task_id,
+#             "session_id": self.session_id
+#             })
+#         if r.status_code >= 400:
+#             r = self._client.post("/reset")
+#         r.raise_for_status()
+#         obs, _, _, info = self._parse(r.json())
+#         return obs, info
+
+#     def step(self, action):
+#         r = self._client.post("/step", json={"action": action, "session_id":self.session_id})
+#         r.raise_for_status()
+#         return self._parse(r.json())
+
+#     def close(self):
+#         self._client.close()
+
+import asyncio
+import websockets
+import json
+
 class RemoteExecutionDeskEnv:
     def __init__(self, base_url: str):
-        self._client = httpx.Client(
-            base_url=base_url.rstrip("/"),
-            timeout=30.0,
-            follow_redirects=True,
-        )
-        self.session_id = str(uuid4())
+        # Convert http(s) to ws(s)
+        self.ws_url = base_url.replace("http", "ws").rstrip("/") + "/ws"
+        self.ws = None
+
+    async def connect(self):
+        self.ws = await websockets.connect(self.ws_url)
+
 
     def _parse(self, payload):
-        obs_wrap = payload.get("observation", {})
-        obs = obs_wrap.get("observation", {})
-        info = obs_wrap.get("info", {})
-        reward = float(payload.get("reward", 0.0) or 0.0)
-        done = bool(payload.get("done", False))
+        dprint("\n" + "="*60)
+        dprint("PARSER RECEIVED RAW DATA:")
+        dprint(json.dumps(payload, indent=2))
+        dprint("="*60 + "\n")
+
+        # 1. Unpack the outer Pydantic/API wrapper
+        data = payload.get("data", payload)
+        
+        # 2. Extract initial candidates
+        # In your JSON, 'info' lives inside 'data.observation'
+        obs_container = data.get("observation", {})
+        reward = float(data.get("reward", 0.0) or 0.0)
+        done = bool(data.get("done", False))
+        
+        # Initialize info
+        info = data.get("info", {})
+
+        # 3. RECURSIVE STRIP
+        # We want to find the dict that contains 'task_stage'
+        # but we must extract 'info' if we see it along the way
+        current = obs_container
+        max_depth = 5
+        
+        for _ in range(max_depth):
+            if not isinstance(current, dict):
+                break
+                
+            # If we found the target, stop
+            if "task_stage" in current:
+                break
+                
+            # Capture 'info' if it exists at this nesting level
+            # In your JSON, info is at the same level as the nested observation
+            if isinstance(current.get("info"), dict) and current["info"]:
+                info = current["info"]
+
+            # Dive deeper if there's another 'observation' key
+            if "observation" in current:
+                current = current["observation"]
+            else:
+                break
+
+        obs = current
+
+        # --- FINAL SAFETY ---
+        if isinstance(obs, dict) and "task_stage" not in obs and "task_stage" in data:
+            obs = data
+
+        dprint(f"Final Obs Keys: {list(obs.keys()) if isinstance(obs, dict) else 'Not a dict'}")
+        dprint(f"Info Keys: {list(info.keys()) if isinstance(info, dict) else 'Empty'}")
         return obs, reward, done, info
 
-    def reset(self, seed, max_steps, task_id: str):
-        r = self._client.post("/reset", json={
-            "seed": seed, 
-            "max_steps": max_steps,
-            "task_id": task_id,
-            "session_id": self.session_id
-            })
-        if r.status_code >= 400:
-            r = self._client.post("/reset")
-        r.raise_for_status()
-        obs, _, _, info = self._parse(r.json())
+
+    async def step(self, action):
+        dprint("i am in step doing", action)
+        try:
+            # 1. dprint the action we are about to send
+            dprint(f"\n[CLIENT] Attempting step with action: {action.get('action_type')}")
+            
+# CORRECT (Flattened)
+            payload = {
+                "type": "step",
+                "data": action  # This puts 'action_type' and 'tool_name' directly under 'data'
+            }
+                        
+            # 2. Send and wait
+            await self.ws.send(json.dumps(payload))
+            
+            dprint("[CLIENT] Waiting for response...")
+            resp = await self.ws.recv()
+            
+            # 3. dprint the raw string immediately
+            dprint("\n" + "!"*60)
+            dprint("RAW RESPONSE RECEIVED:")
+            dprint(resp)
+            dprint("!"*60 + "\n")
+            
+            return self._parse(json.loads(resp))
+
+        except Exception as e:
+            dprint(f"\n[CRITICAL ERROR IN STEP]: {e}")
+            # dprint the traceback to see exactly which line failed
+            import traceback
+            traceback.print_exc()
+            raise e
+
+    async def reset(self, seed, max_steps, task_id: str):
+        await self.connect()
+        
+        # We wrap the parameters inside 'data'
+        payload = {
+            "type": "reset",
+            "data": {
+                "seed": seed,
+                "max_steps": max_steps,
+                "task_id": task_id
+            }
+        }
+        
+        dprint(f"[CLIENT] Sending Reset Payload...")
+        await self.ws.send(json.dumps(payload))
+        resp = await self.ws.recv()
+        
+        obs, _, _, info = self._parse(json.loads(resp))
         return obs, info
 
-    def step(self, action):
-        r = self._client.post("/step", json={"action": action, "session_id":self.session_id})
-        r.raise_for_status()
-        return self._parse(r.json())
-
-    def close(self):
-        self._client.close()
+    async def close(self):
+        if self.ws:
+            await self.ws.close()
 
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -211,25 +341,30 @@ def extract_error(info: Dict[str, Any]) -> Optional[str]:
     return None
 
 def summarize_for_model(observation: Dict[str, Any], info: Dict[str, Any], step: int) -> str:
-    return json.dumps(
-        {
-            "step": step,
-            "task_stage": observation["task_stage"],
-            "position_state": observation["position_state"],
-            "system_status": observation["system_status"],
-            "order_state": {
-                "open_order_count": observation["order_state"]["open_order_count"],
-                "recent_fills": observation["order_state"]["recent_fills"][-2:],
-            },
-            "data_validation": info["data_validation"],
-            "system_readiness": info["system_readiness"],
-            "execution_status": info["execution_status"],
+    # Use .get() to avoid KeyErrors if the environment sends partial data
+    order_state = observation.get("order_state", {})
+    summary_dict = {
+        "step": step,
+        "task_stage": observation.get("task_stage", "unknown"),
+        "position_state": observation.get("position_state", {}),
+        "system_status": observation.get("system_status", {}),
+        "order_state": {
+            "open_order_count": order_state.get("open_order_count", 0),
+            "recent_fills": order_state.get("recent_fills", [])[-2:],
         },
-        sort_keys=True,
-    )
+        # Info might be empty if the parser missed it or the API didn't send it
+        "data_validation": info.get("data_validation", "No data validation info"),
+        "system_readiness": info.get("system_readiness", "No readiness info"),
+        "execution_status": info.get("execution_status", {}),
+    }
+    dprint("-------------------------")
+
+    
+    return json.dumps(summary_dict, sort_keys=True, indent=2)
 
 def get_model_action(client: OpenAI, observation: Dict[str, Any], info: Dict[str, Any], step: int) -> Dict[str, Any]:
     fallback = heuristic_policy(observation, info)
+    dprint("I GETTIGN THE MODEL ACTION ")
     try:
         obs_summary = summarize_for_model(observation, info, step)
 
@@ -246,10 +381,10 @@ def get_model_action(client: OpenAI, observation: Dict[str, Any], info: Dict[str
         )
         content = (completion.choices[0].message.content or "").strip()
         parsed = parse_model_action(content)
+        dprint(content)
+        dprint(parsed)
         return {
             "action": parsed if parsed else fallback,
-            "model_output": content,
-            "model_input": obs_summary
             }
     except Exception:
         return {
@@ -259,7 +394,7 @@ def get_model_action(client: OpenAI, observation: Dict[str, Any], info: Dict[str
         }
 # ---------------- Main ----------------
 
-def main():
+async def main():
     args = parse_args()
     client = build_client()
     env = RemoteExecutionDeskEnv(args.env_url)   
@@ -281,20 +416,37 @@ def main():
             log_start(task_id, BENCHMARK, MODEL_NAME)
 
             try:
-                observation, info = env.reset(SEED, MAX_STEPS, task_id)
+                observation, info = await env.reset(SEED, MAX_STEPS, task_id)
                 done = False
 
                 for step in range(1, MAX_STEPS + 1):
                     if done:
                         break
 
-                    model_result = get_model_action(client, observation, info, step)
-
+                    try:
+                        model_result = get_model_action(client, observation, info, step)
+                        dprint(model_result)
+                    except Exception as e:
+                        dprint(f"[CRASH in get_model_action]: {e}")
+                        # Let's see what keys WERE in observation to see why it failed
+                        dprint(f"Observation keys: {list(observation.keys()) if isinstance(observation, dict) else 'Not a dict'}")
+                        break
                     action = model_result["action"]
-                    model_output = model_result["model_output"]
+                    dprint("final action to send is", action)
+                    dprint("DEBUG: Right before await")
+                    try:
+                        # Force a timeout to see if it even attempts to start
+                        dprint("trying")
+                        dprint("Testing event loop heartbeat...")
+                        await asyncio.sleep(0.1)
+                        dprint("Heartbeat okay. Now entering step...")
 
-                    observation, reward, done, info = env.step(action)
-
+                        observation, reward, done, info = await asyncio.wait_for(env.step(action), timeout=5.0)
+                        dprint(observation)
+                    except asyncio.TimeoutError:
+                        dprint("CRITICAL: await env.step(action) timed out before even dprinting inside the function!")
+                    except Exception as e:
+                        dprint(f"Caught early error: {e}")
                     rewards.append(reward)
                     steps_taken = step
 
@@ -305,9 +457,6 @@ def main():
                         done,
                         extract_error(info),
                     )
-
-                    if model_output == "ERROR":
-                        print("[DEBUG] model failed → fallback used")
 
                     if done:
                         break
@@ -322,7 +471,7 @@ def main():
                 print(f"An error occurred: {e}")
                 continue
     finally:
-        env.close() 
+        await env.close() 
     
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
