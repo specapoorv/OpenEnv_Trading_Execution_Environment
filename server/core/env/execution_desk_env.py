@@ -499,7 +499,7 @@ class ExecutionDeskEnv(OpenEnvEnv):
                 #TASK 1 Completed, Grader can grade now
                 self.scenario.completed_flags["data_ready"] = True
                 self.scenario.grades["task1_data"] = grade_data_validation(self.scenario)
-                self.scenario.stage = Stage.SYSTEM_HEALTH
+                self.scenario.stage = Stage.DONE
                 event["stage_advanced"] = True
             else:
                 event["premature_declare"] = True
@@ -510,7 +510,7 @@ class ExecutionDeskEnv(OpenEnvEnv):
             if self.scenario.stage == Stage.SYSTEM_HEALTH and readiness["ready"]:
                 self.scenario.completed_flags["systems_ready"] = True
                 self.scenario.grades["task2_system"] = grade_system_readiness(self.scenario)
-                self.scenario.stage = Stage.EXECUTION
+                self.scenario.stage = Stage.DONE
                 # Record when execution stage started for the step-budget grader
                 self.scenario.execution_truth["exec_stage_start_step"] = self.scenario.step_count
                 event["stage_advanced"] = True

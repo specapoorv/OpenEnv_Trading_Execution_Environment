@@ -57,19 +57,28 @@ def check_terminal_conditions(state: ScenarioState, recency_limit_minutes: int) 
     event: Dict[str, Any] = {}
     from server.core.utils.constants import Stage
 
+    # SUCCESS TERMINATION
+    # This catches any task completion because _handle_declare sets stage to DONE
     if state.stage == Stage.DONE:
-        return True, False, {"success": True}
+        return True, False, {"success": True, "msg": "Task sequence completed successfully"}
+
+    # ESCALATION TERMINATION (Special case for Task 2)
     if state.escalated and state.stage == Stage.SYSTEM_HEALTH:
         unresolved = system_unresolved_issues(state)
+        # It's a correct termination if there were actual issues requiring human intervention
         return True, False, {"correct_escalation": bool(unresolved), "unresolved_issues": len(unresolved)}
+
+    # TIMEOUT / TRUNCATION
     if state.step_count >= state.max_steps:
-        unresolved = 0
+        unresolved_count = 0
         if state.stage == Stage.DATA_VALIDATION:
-            unresolved = len(evaluate_data_readiness(state, recency_limit_minutes)["issues"])
+            unresolved_count = len(evaluate_data_readiness(state, recency_limit_minutes)["issues"])
         elif state.stage == Stage.SYSTEM_HEALTH:
-            unresolved = len(system_unresolved_issues(state))
-        else:
-            unresolved = 0 if evaluate_execution_complete(state)["ready"] else 1
-        event["unresolved_issues"] = unresolved
+            unresolved_count = len(system_unresolved_issues(state))
+        elif state.stage == Stage.EXECUTION:
+            unresolved_count = 0 if evaluate_execution_complete(state)["ready"] else 1
+            
+        event["unresolved_issues"] = unresolved_count
         return False, True, event
+
     return False, False, event
