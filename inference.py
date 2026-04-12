@@ -12,6 +12,8 @@ from openai import OpenAI
 
 from server.core.env.execution_desk_env import heuristic_policy
 from server.core.utils.constants import ActionType
+from uuid import uuid4
+
 
 load_dotenv()
 
@@ -97,6 +99,7 @@ class RemoteExecutionDeskEnv:
             timeout=30.0,
             follow_redirects=True,
         )
+        self.session_id = str(uuid4())
 
     def _parse(self, payload):
         obs_wrap = payload.get("observation", {})
@@ -110,7 +113,8 @@ class RemoteExecutionDeskEnv:
         r = self._client.post("/reset", json={
             "seed": seed, 
             "max_steps": max_steps,
-            "task_id": task_id
+            "task_id": task_id,
+            "session_id": self.session_id
             })
         if r.status_code >= 400:
             r = self._client.post("/reset")
@@ -119,15 +123,12 @@ class RemoteExecutionDeskEnv:
         return obs, info
 
     def step(self, action):
-        r = self._client.post("/step", json={"action": action})
+        r = self._client.post("/step", json={"action": action, "session_id":self.session_id})
         r.raise_for_status()
         return self._parse(r.json())
 
     def close(self):
         self._client.close()
-
-
-# ---------------- Logging ----------------
 
 def log_start(task, env, model):
     print(f"[START] task={task} env={env} model={model}", flush=True)

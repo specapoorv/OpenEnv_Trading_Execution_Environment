@@ -360,6 +360,8 @@ class ExecutionDeskEnv(OpenEnvEnv):
         self.observation_space = build_observation_space(max_steps)
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[Dict[str, Any]] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        print("[ENV INSTANCE ID]", id(self))
+
         if seed is not None:
             self._seed = seed
         else:
@@ -387,6 +389,7 @@ class ExecutionDeskEnv(OpenEnvEnv):
         return build_observation(self.scenario), build_info(self.scenario, self.tool_sim.recency_limit_minutes)
 
     def step(self, action: Dict[str, Any]) -> Tuple[Dict[str, Any], float, bool, bool, Dict[str, Any]]:
+        print("[ENV INSTANCE ID]", id(self))
         prev_state = copy.deepcopy(self.scenario)
         event: Dict[str, Any] = {}
         action = normalize_action(action, self.scenario)

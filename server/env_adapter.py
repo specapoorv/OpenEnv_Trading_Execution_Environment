@@ -28,6 +28,7 @@ class EnvAdapter(Environment):
 
     def __init__(self, seed: int = 7, max_steps: int = 60):
         self._env = ExecutionDeskEnv(seed=seed, max_steps=max_steps)
+        print("[ENV INSTANCE ID]", id(self._env))
         self._seed = seed
         self._state = State(episode_id=str(uuid4()), step_count=0)
     def reset(self, seed: int | None = None, episode_id: str | None = None, **kwargs: Any) -> ExecutionDeskObservation:
